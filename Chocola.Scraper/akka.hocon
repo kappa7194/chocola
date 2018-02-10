@@ -1,0 +1,13 @@
+﻿akka {
+    stdout-loglevel = DEBUG
+    loglevel = DEBUG
+    actor {
+        debug {
+            receive = on
+            autoreceive = on
+            lifecycle = on
+            event-stream = on
+            unhandled = on
+        }
+    }
+}
