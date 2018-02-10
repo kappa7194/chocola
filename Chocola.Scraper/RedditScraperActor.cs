@@ -2,23 +2,30 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
+    using System.Linq;
 
     using Akka.Actor;
     using Akka.Event;
-
+    using AutoMapper;
     using Newtonsoft.Json;
 
     using RestSharp;
 
-    public class RedditScraperActor : ReceiveActor, IWithUnboundedStash
+    public class RedditScraperActor : ReceiveActor, IWithUnboundedStash, ILogReceive
     {
         private readonly ILoggingAdapter log = Logging.GetLogger(Context);
+        private readonly IMapper mapper;
 
         private string accessToken;
-        private int expiresIn;
+        private long expiresIn;
 
         public RedditScraperActor()
         {
+            this.mapper = new MapperConfiguration(config =>
+            {
+                config.CreateMap<ChildData, Post>().ForMember(a => a.CreatedUtc, a => a.MapFrom(b => new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(b.CreatedUtc)));
+            }).CreateMapper();
             this.Become(this.Anonymous);
         }
 
@@ -50,15 +57,34 @@
             this.Receive<ScrapeMessage>(message =>
             {
                 this.log.Info("Scrape message received.");
-                this.log.Info("Starting scrape.");
                 var request = new RestRequest();
                 request.Method = Method.GET;
                 request.Resource = "/r/" + message.Subreddit + "/new";
                 request.AddHeader("Authorization", "Bearer " + this.accessToken);
+                if (message.After != null)
+                {
+                    request.AddQueryParameter("after", message.After);
+                }
+                //request.AddQueryParameter("count", message.Count.ToString("D", CultureInfo.InvariantCulture));
+                request.AddQueryParameter("limit", "100");
+                request.AddQueryParameter("show", "all");
                 var client = new RestClient();
                 client.BaseUrl = new Uri("https://oauth.reddit.com");
                 var response = client.Execute<Listing>(request);
-                this.log.Info("Scrape completed.");
+                if (response.Data == null)
+                {
+                    throw new Exception("Something went wrong.");
+                }
+                var posts = this.mapper.Map<Post[]>(response.Data.Data.Children.Select(a => a.Data));
+                this.Sender.Tell(new PageScrapedMessage(posts), this.Self);
+                if (response.Data.Data.After != null)
+                {
+                    this.Self.Tell(new ScrapeMessage(message.Subreddit, response.Data.Data.After, message.Count + posts.Length), this.Sender);
+                }
+                else
+                {
+                    this.Sender.Tell(new CompletedMessage(), this.Self);
+                }
                 return true;
             });
         }
@@ -68,9 +94,23 @@
             return Props.Create<RedditScraperActor>();
         }
 
+        public class CompletedMessage
+        {
+        }
+
+        public class PageScrapedMessage
+        {
+            public PageScrapedMessage(IEnumerable<Post> posts)
+            {
+                this.Posts = posts.ToArray();
+            }
+
+            public Post[] Posts { get; }
+        }
+
         public class CredentialsMessage
         {
-            public CredentialsMessage(string accessToken, int expiresIn)
+            public CredentialsMessage(string accessToken, long expiresIn)
             {
                 this.AccessToken = accessToken;
                 this.ExpiresIn = expiresIn;
@@ -78,15 +118,21 @@
 
             public string AccessToken { get; }
 
-            public int ExpiresIn { get; }
+            public long ExpiresIn { get; }
         }
 
         public class ScrapeMessage
         {
-            public ScrapeMessage(string subreddit)
+            public ScrapeMessage(string subreddit, string before, int count)
             {
                 this.Subreddit = subreddit;
+                this.After = before;
+                this.Count = count;
             }
+
+            public string After { get; }
+
+            public int Count { get; }
 
             public string Subreddit { get; }
         }
@@ -124,7 +170,7 @@
             public string Author { get; set; }
 
             [JsonProperty("created_utc")]
-            public int CreatedOn { get; set; }
+            public long CreatedUtc { get; set; }
 
             [JsonProperty("domain")]
             public string Domain { get; set; }

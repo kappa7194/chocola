@@ -10,7 +10,7 @@
     using RestSharp;
     using RestSharp.Authenticators;
 
-    public class RedditAuthenticatorActor : ReceiveActor
+    public class RedditAuthenticatorActor : ReceiveActor, ILogReceive
     {
         private readonly ILoggingAdapter log = Logging.GetLogger(Context);
         private readonly RedditSettings settings;
@@ -20,7 +20,7 @@
             this.settings = settings;
             this.Receive<AuthenticateMessage>(message =>
             {
-                this.log.Info("Authentication request received.");
+                this.log.Info("Authenticate message received.");
                 var request = new RestRequest();
                 request.Method = Method.POST;
                 request.Resource = "/api/v1/access_token";
@@ -29,7 +29,7 @@
                 client.Authenticator = new HttpBasicAuthenticator(this.settings.ClientId, this.settings.ClientSecret);
                 client.BaseUrl = new Uri("https://www.reddit.com");
                 var response = client.Execute<AccessTokenResponse>(request);
-                this.Sender.Tell(new AuthenticationSuccessfulMessage(response.Data.AccessToken, response.Data.ExpiresIn));
+                this.Sender.Tell(new AuthenticationSuccessfulMessage(response.Data.AccessToken, response.Data.ExpiresIn), this.Self);
                 return true;
             });
         }
@@ -45,14 +45,14 @@
 
         public class AuthenticationSuccessfulMessage
         {
-            public AuthenticationSuccessfulMessage(string accessToken, int expiresIn)
+            public AuthenticationSuccessfulMessage(string accessToken, long expiresIn)
             {
                 this.AccessToken = accessToken;
                 this.ExpiresIn = expiresIn;
             }
 
             public string AccessToken { get; }
-            public int ExpiresIn { get; }
+            public long ExpiresIn { get; }
         }
 
         private class AccessTokenResponse
@@ -64,7 +64,7 @@
             public string TokenType { get; set; }
 
             [JsonProperty("expires_in")]
-            public int ExpiresIn { get; set; }
+            public long ExpiresIn { get; set; }
 
             [JsonProperty("scope")]
             public string Scope { get; set; }

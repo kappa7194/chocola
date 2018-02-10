@@ -17,11 +17,11 @@
             var config = await GetAkkaConfigurationAsync();
             var system = ActorSystem.Create("chocola", config);
             var redditActor = system.ActorOf(RedditActor.GetProps(settings.Reddit), "reddit");
-            Console.Write("Which subreddit should be scraped? ");
             var subreddit = Console.ReadLine();
             redditActor.Tell(new RedditActor.StartMessage(subreddit));
             Console.ReadLine();
             await system.Terminate();
+            Console.ReadLine();
         }
 
         private static async Task<Config> GetAkkaConfigurationAsync()
